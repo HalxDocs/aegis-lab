@@ -75,6 +75,11 @@ npm run sync-fixture  # regenerate every fixture from ../aegis (set AEGIS_GO_REP
 verified against the repository, then built — and stops as soon as one fails, so
 a failing parity check never gets a green build printed after it.
 
+CI runs the same gate on every push and pull request. Because the page proves
+things about the Go repository, the workflow checks that out too and runs
+`make check-all` from it, with `AEGIS_GO_REPO` saying where it landed — so a
+change to the page is gated without a commit to the implementation.
+
 `npm run sync-fixture` shells out to `go run ./cmd/aegis run --scenario <name>
 --format jsonl` for each of the four scenarios in the Go repository, defaulting
 to `../aegis`.
