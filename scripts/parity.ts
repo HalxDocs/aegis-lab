@@ -10,7 +10,16 @@
  *   cd ../aegis && go run ./cmd/aegis run --scenario lone-witness --format jsonl
  *
  * Run: npm run parity
+ *
+ * The first pass runs the Go program again and compares it with the committed
+ * fixture, because "the two logs disagree" has two causes that need opposite
+ * repairs. If the implementation moved, the fixture is a stale copy and has to be
+ * recopied; if it did not, the port drifted and the fixture is right. Checking the
+ * implementation first is the only way to tell a reader which of the two they are
+ * looking at — and if both moved, the stale fixture is still the first thing to
+ * fix, since comparing the port against yesterday's log proves nothing.
  */
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -18,7 +27,7 @@ import { fileURLToPath } from "node:url";
 
 import { CausalIndex, countOf, depthOf } from "../src/engine/causal";
 import { toJsonl } from "../src/engine/recorder";
-import { differences, gatePath, measureGate, type GateFacts } from "./gate-lib";
+import { differences, gatePath, goRepo, measureGate, type GateFacts } from "./gate-lib";
 import {
   DEFAULT_PARAMS,
   runLab,
@@ -50,6 +59,83 @@ const worlds: World[] = [
   { name: "lone-witness", fixture: "lone-witness.jsonl", run: () => runLoneWitness(0) },
 ];
 
+/** Where a fixture lives, as a reader of the message would type it. */
+const fixturePath = (fixture: string) => `src/engine/fixtures/${fixture}`;
+
+/** What the Go program produces for a scenario right now. */
+const runGo = (name: string): { ok: boolean; out: string } => {
+  try {
+    const out = execFileSync(
+      "go",
+      ["run", "./cmd/aegis", "run", "--scenario", name, "--format", "jsonl"],
+      { cwd: goRepo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 8 * 1024 * 1024 },
+    );
+    return { ok: true, out };
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string };
+    return { ok: false, out: `${failure.stdout ?? ""}${failure.stderr ?? ""}` };
+  }
+};
+
+/** The index of the first line that differs, or -1 when one list is a prefix. */
+const firstDifference = (a: string[], b: string[]): number => {
+  const limit = Math.min(a.length, b.length);
+  for (let i = 0; i < limit; i += 1) if (a[i] !== b[i]) return i;
+  return -1;
+};
+
+// --- pass one: is the fixture still a copy of the implementation? -----------
+//
+// This runs before any comparison with the port, and it runs for every world so
+// that a change touching three scenarios names all three at once, rather than
+// making the reader regenerate, re-run and discover the next one.
+const stale: string[] = [];
+for (const { name, fixture } of worlds) {
+  const path = fixturePath(fixture);
+  const live = runGo(name);
+  if (!live.ok) {
+    stale.push(
+      `${path} cannot be checked: \`go run ./cmd/aegis run --scenario ${name}\` failed.` +
+        `\n\n${live.out.trim()}` +
+        `\n\n  If the scenario was renamed or removed in the implementation, the fixture` +
+        `\n  named after it is now a fixture for nothing.`,
+    );
+    continue;
+  }
+
+  const fixtureLines = readFileSync(join(fixtures, fixture), "utf8").trimEnd().split("\n");
+  const liveLines = live.out.trimEnd().split("\n");
+  if (fixtureLines.join("\n") === liveLines.join("\n")) continue;
+
+  const at = firstDifference(fixtureLines, liveLines);
+  if (at < 0) {
+    stale.push(
+      `${path} has ${fixtureLines.length} events; the Go program now produces ${liveLines.length}.`,
+    );
+    continue;
+  }
+  stale.push(
+    `${path} differs at event ${at + 1}:` +
+      `\n\n    fixture: ${fixtureLines[at]}` +
+      `\n    live:    ${liveLines[at]}`,
+  );
+}
+
+if (stale.length > 0) {
+  fail(
+    `the committed fixtures are stale — the Go repository no longer produces them.\n\n` +
+      stale.map((entry) => `  ${entry}`).join("\n\n") +
+      `\n\n  A fixture is a copy of the implementation's own output, so a scenario that` +
+      `\n  changed leaves yesterday's log on the page. Recopy every fixture and commit` +
+      `\n  the result:\n\n` +
+      `    AEGIS_GO_REPO=${goRepo} npm run sync-fixture\n` +
+      `\n  until then this check cannot say whether the port agrees with the code,` +
+      `\n  because it is comparing both against a log neither side produces any more.`,
+  );
+}
+
+// --- pass two: does the port still produce the fixture? ----------------------
+
 const compare = ({ name, fixture, run }: World) => {
   const go = readFileSync(join(fixtures, fixture), "utf8");
   const result = run();
@@ -59,11 +145,21 @@ const compare = ({ name, fixture, run }: World) => {
   const tsLines = ts.trimEnd().split("\n");
 
   if (goLines.length !== tsLines.length) {
-    fail(`${name}: Go produced ${goLines.length} events, TypeScript produced ${tsLines.length}`);
+    fail(
+      `${name}: the fixture has ${goLines.length} events, the TypeScript engine produces ${tsLines.length}` +
+        `\n\n  The fixture is what the Go program produces (checked above), so the port has` +
+        `\n  drifted. Fix src/engine/ until it reproduces ${fixturePath(fixture)}.`,
+    );
   }
   for (let i = 0; i < goLines.length; i += 1) {
     if (goLines[i] !== tsLines[i]) {
-      fail(`${name}: event ${i + 1} differs\n\n  go: ${goLines[i]}\n  ts: ${tsLines[i]}`);
+      fail(
+        `${name}: the port differs from the fixture at event ${i + 1}` +
+          `\n\n    fixture: ${goLines[i]}` +
+          `\n    engine:  ${tsLines[i]}` +
+          `\n\n  The fixture matches the Go program, so the divergence is in the port:` +
+          `\n  fix src/engine/ until it reproduces ${fixturePath(fixture)}.`,
+      );
     }
   }
 
