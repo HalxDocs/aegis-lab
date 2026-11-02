@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The page's proof is not self-contained. `npm run gate` measures the Go
+  # repository's packages, tests, coverage and replays, and `npm run parity`
+  # compares all four worlds against fixtures generated from it, so a checkout of
+  # the page alone would have nothing to check itself against.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Fetched into a subdirectory, so the Go repository is checked out beside
+      # nothing and can be pointed at explicitly rather than assumed to be ../.
+      - uses: actions/checkout@v4
+        with:
+          repository: HalxDocs/aegis
+          path: aegis
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: aegis/go.mod
+          # The module has no dependencies and therefore no go.sum, so there is
+          # nothing for the dependency cache to key on.
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      # The same command CI runs from the other repository, not a page-only
+      # subset of it: if a green page could be published over a Go side that no
+      # longer passes its own gate, "gated" would mean two different things
+      # depending on which repository the commit landed in.
+      - name: Gate both sides
+        run: make -C aegis check-all
+        env:
+          LAB: ${{ github.workspace }}
+          AEGIS_GO_REPO: ${{ github.workspace }}/aegis
