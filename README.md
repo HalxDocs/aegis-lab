@@ -75,6 +75,14 @@ npm run sync-fixture  # regenerate every fixture from ../aegis (set AEGIS_GO_REP
 verified against the repository, then built — and stops as soon as one fails, so
 a failing parity check never gets a green build printed after it.
 
+`npm run parity` runs the Go program again before it compares anything, so when
+the two logs disagree it can say which side moved. A scenario that changed in the
+implementation fails as a stale fixture — `src/engine/fixtures/node-crash.jsonl
+differs at event 5`, with the line from each side, and `npm run sync-fixture` to
+recopy it. A port that drifted fails against the fixture instead, and points at
+`src/engine/`. Both are the same exit code and mean opposite repairs, which is why
+the check tells them apart rather than printing one log against another.
+
 CI runs the same gate on every push and pull request. Because the page proves
 things about the Go repository, the workflow checks that out too and runs
 `make check-all` from it, with `AEGIS_GO_REPO` saying where it landed — so a
