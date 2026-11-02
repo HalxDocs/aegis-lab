@@ -21,7 +21,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,6 +77,61 @@ const runGo = (name: string): { ok: boolean; out: string } => {
   }
 };
 
+/**
+ * Where the Go repository defines a scenario, as `path:line`.
+ *
+ * The page and the implementation each decide what a scenario is: the Go spec
+ * says it, and the fixture is the log of it. Naming the Go side is the
+ * difference between "this file is stale" and "somewhere over there something
+ * moved", and it is discovered by reading the repository rather than hardcoded,
+ * so a scenario that migrates to its own file is still found.
+ */
+const scenarioSource = (name: string): string | null => {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Both spellings occur: a struct literal (`Name: "x"`) and a spec built by
+  // mutation (`spec.Name = "x"`), and gofmt may pad either one.
+  const declared = new RegExp(`\\bName\\s*[:=]\\s*"${escaped}"`);
+  const mentioned = new RegExp(`"${escaped}"`);
+
+  let files: string[];
+  try {
+    files = readdirSync(goRepo, { recursive: true, encoding: "utf8" }).sort();
+  } catch {
+    return null;
+  }
+
+  // A declaration is the definition. A bare mention is only a guess, so it is
+  // ranked: a registry or table inside the scenario package first, then anything
+  // else — which keeps the flag parser in cmd/ from answering for a scenario it
+  // merely knows the name of.
+  let loose: { where: string; rank: number } | null = null;
+  for (const file of files) {
+    if (!file.endsWith(".go") || file.endsWith("_test.go")) continue;
+    let text: string;
+    try {
+      text = readFileSync(join(goRepo, file), "utf8");
+    } catch {
+      continue;
+    }
+    const lines = text.split("\n");
+    const at = lines.findIndex((line) => declared.test(line));
+    if (at >= 0) return `${file}:${at + 1}`;
+
+    const rank = file.startsWith("internal/scenario/") ? 0 : 1;
+    if (loose === null || rank < loose.rank) {
+      const line = lines.findIndex((candidate) => mentioned.test(candidate));
+      if (line >= 0) loose = { where: `${file}:${line + 1}`, rank };
+    }
+  }
+  return loose?.where ?? null;
+};
+
+/** A sentence pointing at the implementation's half of the copy, when found. */
+const definedIn = (name: string): string => {
+  const source = scenarioSource(name);
+  return source === null ? "" : `\n    the scenario is defined in ${source}`;
+};
+
 /** The index of the first line that differs, or -1 when one list is a prefix. */
 const firstDifference = (a: string[], b: string[]): number => {
   const limit = Math.min(a.length, b.length);
@@ -96,6 +151,7 @@ for (const { name, fixture } of worlds) {
   if (!live.ok) {
     stale.push(
       `${path} cannot be checked: \`go run ./cmd/aegis run --scenario ${name}\` failed.` +
+        definedIn(name) +
         `\n\n${live.out.trim()}` +
         `\n\n  If the scenario was renamed or removed in the implementation, the fixture` +
         `\n  named after it is now a fixture for nothing.`,
@@ -110,12 +166,14 @@ for (const { name, fixture } of worlds) {
   const at = firstDifference(fixtureLines, liveLines);
   if (at < 0) {
     stale.push(
-      `${path} has ${fixtureLines.length} events; the Go program now produces ${liveLines.length}.`,
+      `${path} has ${fixtureLines.length} events; the Go program now produces ${liveLines.length}.` +
+        definedIn(name),
     );
     continue;
   }
   stale.push(
     `${path} differs at event ${at + 1}:` +
+      definedIn(name) +
       `\n\n    fixture: ${fixtureLines[at]}` +
       `\n    live:    ${liveLines[at]}`,
   );
