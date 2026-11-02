@@ -1,0 +1,16 @@
+{
+  "packages": 9,
+  "test": true,
+  "race": true,
+  "vet": true,
+  "coverage": 92.4,
+  "replay": {
+    "ok": true,
+    "scenarios": [
+      "node-crash",
+      "one-way-partition",
+      "recovered-crash",
+      "lone-witness"
+    ]
+  }
+}
