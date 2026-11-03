@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { CausalIndex, countOf, depthOf } from "../src/engine/causal";
 import { toJsonl } from "../src/engine/recorder";
 import { differences, gatePath, goRepo, measureGate, type GateFacts } from "./gate-lib";
+import { runnableScenarios } from "./go-scenarios";
 import {
   DEFAULT_PARAMS,
   runLab,
@@ -439,6 +440,40 @@ if (stale.length > 0) {
         : "") +
       `\n  until then this check cannot say whether the port agrees with the code,` +
       `\n  because it is comparing both against a log neither side produces any more.`,
+  );
+}
+
+// --- does a world exist for every scenario the implementation runs? ---------
+//
+// The worlds above are a hand-written list, so a scenario added in the Go
+// repository is simply absent here: no fixture, no comparison, and a green page
+// that says nothing about it. That is the failure mode worth checking for, since
+// every other message in this file is about a scenario someone remembered.
+const runnable = runnableScenarios(goRepo);
+if (runnable === null) {
+  fail(
+    `could not read the runnable scenarios from cmd/aegis/main.go.\n\n` +
+      `  This check compares the worlds against \`func lookup\`, whose case "name":` +
+      `\n  arms are the set. If that moved or was reshaped, the check cannot tell which` +
+      `\n  scenarios exist, and a coverage check that cannot see the list would pass` +
+      `\n  whatever it was handed.`,
+  );
+}
+
+const covered = new Set(worlds.map(({ name }) => name));
+const uncovered = runnable.filter((name) => !covered.has(name));
+if (uncovered.length > 0) {
+  fail(
+    `the implementation runs ${runnable.length} scenarios; the page covers ${covered.size}.\n\n` +
+      uncovered.map((name) => `  uncovered: ${name}`).join("\n") +
+      `\n\n  A scenario is checked only if a world runs it: a fixture to compare against` +
+      `\n  and a run of the port to compare it with. For each name above:` +
+      `\n\n` +
+      `    src/engine/scenario.ts  a run of the port for that scenario` +
+      `\n    scripts/parity.ts       a world naming it and its fixture` +
+      `\n    npm run sync-fixture    writes the fixture from the implementation` +
+      `\n\n  Until then this check is green about a scenario it never exercises, which is` +
+      `\n  worse than red: a page that omits one still reads as having checked them all.`,
   );
 }
 
