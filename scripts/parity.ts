@@ -455,10 +455,10 @@ const runnable =
   runnableScenarios(goRepo) ??
   fail(
     `could not read the runnable scenarios from cmd/aegis/main.go.\n\n` +
-      `  This check compares the worlds against \`func lookup\`, whose case "name":` +
-      `\n  arms are the set. If that moved or was reshaped, the check cannot tell which` +
-      `\n  scenarios exist, and a coverage check that cannot see the list would pass` +
-      `\n  whatever it was handed.`,
+      `  This check compares the worlds against the \`runnable\` table in` +
+      `\n  cmd/aegis/main.go, whose names are the set. If that moved or was reshaped,` +
+      `\n  the check cannot tell which scenarios exist, and a coverage check that cannot` +
+      `\n  see the list would pass whatever it was handed.`,
   );
 
 const covered = new Set(worlds.map(({ name }) => name));

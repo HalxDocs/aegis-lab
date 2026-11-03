@@ -87,8 +87,8 @@ moves. A port that drifted fails against the fixture instead, and points at
 the check tells them apart rather than printing one log against another.
 
 The worlds are a hand-written list, so `npm run parity` also compares it against
-the scenarios the implementation can run — read from its own `func lookup`, not
-from the usage text beside it. A scenario that exists but has no world fails the
+the scenarios the implementation can run — read from the `runnable` table in
+`cmd/aegis/main.go`, not from the usage text beside it. A scenario that exists but has no world fails the
 check by name, because a page that omits one still reads as having checked them
 all.
 
@@ -99,8 +99,8 @@ change to the page is gated without a commit to the implementation.
 
 `npm run sync-fixture` shells out to `go run ./cmd/aegis run --scenario <name>
 --format jsonl` for each scenario the Go repository can run, defaulting to
-`../aegis`. That list is read from the implementation's `func lookup` rather than
-kept here, so a new scenario is synced instead of being left with a fixture
+`../aegis`. That list is read from the implementation's `runnable` table rather
+than kept here, so a new scenario is synced instead of being left with a fixture
 nobody writes.
 
 The proof card's gate numbers — packages, test and race results, vet, coverage,
