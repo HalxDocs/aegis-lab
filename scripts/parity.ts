@@ -435,7 +435,7 @@ if (stale.length > 0) {
       (unrunnable
         ? `\n  A scenario the implementation no longer runs cannot be recopied: either the` +
           `\n  name in the fixture and in src/engine/scenario.ts is stale and should follow` +
-          `\n  the new one, or the scenario is gone and its fixture should go with it.`
+          `\n  the new one, or the scenario is gone and its fixture should go with it.\n`
         : "") +
       `\n  until then this check cannot say whether the port agrees with the code,` +
       `\n  because it is comparing both against a log neither side produces any more.`,
