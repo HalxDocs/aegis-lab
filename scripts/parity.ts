@@ -449,8 +449,10 @@ if (stale.length > 0) {
 // repository is simply absent here: no fixture, no comparison, and a green page
 // that says nothing about it. That is the failure mode worth checking for, since
 // every other message in this file is about a scenario someone remembered.
-const runnable = runnableScenarios(goRepo);
-if (runnable === null) {
+// `fail` never returns, so this is total: the value is a list or the process is
+// over, and the message below has no null to allow for.
+const runnable =
+  runnableScenarios(goRepo) ??
   fail(
     `could not read the runnable scenarios from cmd/aegis/main.go.\n\n` +
       `  This check compares the worlds against \`func lookup\`, whose case "name":` +
@@ -458,7 +460,6 @@ if (runnable === null) {
       `\n  scenarios exist, and a coverage check that cannot see the list would pass` +
       `\n  whatever it was handed.`,
   );
-}
 
 const covered = new Set(worlds.map(({ name }) => name));
 const uncovered = runnable.filter((name) => !covered.has(name));
