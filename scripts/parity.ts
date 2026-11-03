@@ -126,17 +126,206 @@ const scenarioSource = (name: string): string | null => {
   return loose?.where ?? null;
 };
 
-/** A sentence pointing at the implementation's half of the copy, when found. */
-const definedIn = (name: string): string => {
+/** The implementation's half of the copy, as a line a reader can act on. */
+const provenanceNote = (name: string): string[] => {
   const source = scenarioSource(name);
-  return source === null ? "" : `\n    the scenario is defined in ${source}`;
+  return source === null ? [] : [`defined in ${source}`];
 };
+
+/** Indents every line after the first, leaving blank lines blank. */
+const indentLines = (lines: string[]): string =>
+  lines.map((line, i) => (i === 0 || line === "" ? line : `    ${line}`)).join("\n");
 
 /** The index of the first line that differs, or -1 when one list is a prefix. */
 const firstDifference = (a: string[], b: string[]): number => {
   const limit = Math.min(a.length, b.length);
   for (let i = 0; i < limit; i += 1) if (a[i] !== b[i]) return i;
   return -1;
+};
+
+/** A parsed event, or null when the line is not JSON. */
+const parseRow = (line: string): Record<string, unknown> | null => {
+  try {
+    const value: unknown = JSON.parse(line);
+    return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
+const kindOf = (row: Record<string, unknown>): string =>
+  typeof row.kind === "string" ? row.kind : "?";
+
+/** A tick, in the milliseconds the log is written in. */
+const asMs = (value: unknown): string =>
+  typeof value === "number" ? `${value / 1_000_000}ms` : JSON.stringify(value);
+
+const signed = (value: number): string => `${value > 0 ? "+" : ""}${value / 1_000_000}ms`;
+
+/** `link_restored ×2 (#17, #18)` — a multiset with the seqs it came from. */
+const tally = (rows: Record<string, unknown>[], indices: number[]): string => {
+  const groups = new Map<string, number[]>();
+  for (const index of indices) {
+    const seq = rows[index].seq;
+    const kind = kindOf(rows[index]);
+    groups.set(kind, [...(groups.get(kind) ?? []), typeof seq === "number" ? seq : index + 1]);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+    .map(([kind, seqs]) =>
+      seqs.length === 1
+        ? `${kind} (#${seqs[0]})`
+        : `${kind} ×${seqs.length} (#${seqs.join(", #")})`,
+    )
+    .join(", ");
+};
+
+/**
+ * The longest common subsequence of two kind sequences, as the indices that were
+ * added and removed.
+ *
+ * A log is an ordered list, so one event inserted in the middle shifts every seq
+ * after it: comparing index by index would report half the file as changed and
+ * say nothing about the single event that was added.
+ */
+const alignKinds = (before: string[], after: string[]): { added: number[]; removed: number[] } => {
+  const table: number[][] = Array.from({ length: before.length + 1 }, () =>
+    new Array<number>(after.length + 1).fill(0),
+  );
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    for (let j = after.length - 1; j >= 0; j -= 1) {
+      table[i][j] =
+        before[i] === after[j]
+          ? table[i + 1][j + 1] + 1
+          : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+
+  const added: number[] = [];
+  const removed: number[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < before.length && j < after.length) {
+    if (before[i] === after[j]) {
+      i += 1;
+      j += 1;
+    } else if (table[i + 1][j] >= table[i][j + 1]) {
+      removed.push(i);
+      i += 1;
+    } else {
+      added.push(j);
+      j += 1;
+    }
+  }
+  while (i < before.length) {
+    removed.push(i);
+    i += 1;
+  }
+  while (j < after.length) {
+    added.push(j);
+    j += 1;
+  }
+  return { added, removed };
+};
+
+/** Everything about an event except its timestamp, independently of key order. */
+const shapeOf = (row: Record<string, unknown>): string =>
+  JSON.stringify(
+    Object.keys(row)
+      .filter((key) => key !== "at")
+      .sort()
+      .map((key) => [key, row[key]]),
+  );
+
+/** The first field two events disagree on, timestamp included. */
+const firstField = (a: Record<string, unknown>, b: Record<string, unknown>): string | null => {
+  const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
+  for (const key of keys) {
+    if (JSON.stringify(a[key]) !== JSON.stringify(b[key])) return key;
+  }
+  return null;
+};
+
+/**
+ * What changed between the fixture and what the implementation produces now.
+ *
+ * The first differing line is already what the port check prints, and alone it
+ * says very little: `heartbeat_sent` against `heartbeat_sent`, one digit apart,
+ * does not tell the reader whether a number moved or an event appeared. So the
+ * difference is classified — events added, removed, retimed, or changed in some
+ * other field — and only then is one example given.
+ */
+const describeDrift = (fixtureLines: string[], liveLines: string[]): string[] => {
+  const before = fixtureLines.map(parseRow);
+  const after = liveLines.map(parseRow);
+
+  // A log that will not parse is a different problem, and guessing at it would
+  // hide the parse error rather than report it.
+  if (before.includes(null) || after.includes(null)) {
+    const index = firstDifference(fixtureLines, liveLines);
+    return [
+      `${fixtureLines.length} events before, ${liveLines.length} now; first difference at ${index < 0 ? "the end" : `#${index + 1}`}`,
+    ];
+  }
+
+  const rowsBefore = before as Record<string, unknown>[];
+  const rowsAfter = after as Record<string, unknown>[];
+  const { added, removed } = alignKinds(rowsBefore.map(kindOf), rowsAfter.map(kindOf));
+
+  if (added.length > 0 || removed.length > 0) {
+    const out = [`${rowsAfter.length} events now, ${rowsBefore.length} before`];
+    if (added.length > 0) out.push(`added: ${tally(rowsAfter, added)}`);
+    if (removed.length > 0) out.push(`removed: ${tally(rowsBefore, removed)}`);
+    const firstAdded = added[0];
+    if (firstAdded !== undefined) {
+      const row = rowsAfter[firstAdded];
+      out.push(`first added: #${row.seq} ${kindOf(row)} at ${asMs(row.at)}`);
+    }
+    return out;
+  }
+
+  // Same events in the same order, so the differences can be counted per event.
+  const retimed: number[] = [];
+  const reshaped: number[] = [];
+  let first = -1;
+  for (let index = 0; index < rowsBefore.length; index += 1) {
+    if (fixtureLines[index] === liveLines[index]) continue;
+    if (first < 0) first = index;
+    if (rowsBefore[index].at !== rowsAfter[index].at) retimed.push(index);
+    if (shapeOf(rowsBefore[index]) !== shapeOf(rowsAfter[index])) reshaped.push(index);
+  }
+
+  const out = [`${rowsAfter.length} events in both, ${retimed.length + reshaped.length - overlap(retimed, reshaped)} differ`];
+
+  if (retimed.length > 0) {
+    const deltas = retimed.map(
+      (index) => (rowsAfter[index].at as number) - (rowsBefore[index].at as number),
+    );
+    const low = Math.min(...deltas);
+    const high = Math.max(...deltas);
+    const moved =
+      low === high ? `every one by ${signed(low)}` : `by ${signed(low)} to ${signed(high)}`;
+    out.push(`timing: ${retimed.length} retimed, ${moved}`);
+  }
+  if (reshaped.length > 0) {
+    out.push(`content: ${reshaped.length} changed beyond their timestamp`);
+  }
+
+  const row = first < 0 ? null : firstField(rowsBefore[first], rowsAfter[first]);
+  if (first >= 0 && row !== null) {
+    const a = rowsBefore[first];
+    const b = rowsAfter[first];
+    const show = (value: unknown) => (row === "at" ? asMs(value) : JSON.stringify(value));
+    out.push(`first: #${a.seq} ${kindOf(a)} ${row} ${show(a[row])} → ${show(b[row])}`);
+  }
+
+  return out.length === 0 ? ["the bytes differ but no field does: check trailing whitespace"] : out;
+};
+
+/** How many indices the two lists share, without counting them twice. */
+const overlap = (a: number[], b: number[]): number => {
+  const seen = new Set(b);
+  return a.filter((value) => seen.has(value)).length;
 };
 
 // --- pass one: is the fixture still a copy of the implementation? -----------
@@ -150,11 +339,14 @@ for (const { name, fixture } of worlds) {
   const live = runGo(name);
   if (!live.ok) {
     stale.push(
-      `${path} cannot be checked: \`go run ./cmd/aegis run --scenario ${name}\` failed.` +
-        definedIn(name) +
-        `\n\n${live.out.trim()}` +
-        `\n\n  If the scenario was renamed or removed in the implementation, the fixture` +
-        `\n  named after it is now a fixture for nothing.`,
+      indentLines([
+        `${path} cannot be checked: \`go run ./cmd/aegis run --scenario ${name}\` failed.`,
+        ...provenanceNote(name),
+        "",
+        ...live.out.trim().split("\n"),
+        "",
+        "If the scenario was renamed or removed in the implementation, the fixture named after it is now a fixture for nothing.",
+      ]),
     );
     continue;
   }
@@ -163,20 +355,7 @@ for (const { name, fixture } of worlds) {
   const liveLines = live.out.trimEnd().split("\n");
   if (fixtureLines.join("\n") === liveLines.join("\n")) continue;
 
-  const at = firstDifference(fixtureLines, liveLines);
-  if (at < 0) {
-    stale.push(
-      `${path} has ${fixtureLines.length} events; the Go program now produces ${liveLines.length}.` +
-        definedIn(name),
-    );
-    continue;
-  }
-  stale.push(
-    `${path} differs at event ${at + 1}:` +
-      definedIn(name) +
-      `\n\n    fixture: ${fixtureLines[at]}` +
-      `\n    live:    ${liveLines[at]}`,
-  );
+  stale.push(indentLines([path, ...provenanceNote(name), ...describeDrift(fixtureLines, liveLines)]));
 }
 
 if (stale.length > 0) {
