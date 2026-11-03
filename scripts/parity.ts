@@ -237,6 +237,54 @@ const shapeOf = (row: Record<string, unknown>): string =>
       .map((key) => [key, row[key]]),
   );
 
+/** How many field names a content summary lists before summarising the rest. */
+const DETAIL_FIELDS = 4;
+
+/**
+ * How each field differs across a set of aligned event pairs, `at` excepted.
+ *
+ * A struct that gains one field changes every event in the file, and "16 events
+ * changed" is true and useless: the reader wants the field's name, once. The
+ * timestamp is left out here because it is counted separately as timing, and a
+ * field that merely moved with it is not a content change.
+ */
+const tallyFields = (
+  before: Record<string, unknown>[],
+  after: Record<string, unknown>[],
+  indices: number[],
+): Map<string, { added: number; removed: number; changed: number }> => {
+  const counts = new Map<string, { added: number; removed: number; changed: number }>();
+  const bump = (field: string, kind: "added" | "removed" | "changed") => {
+    const entry = counts.get(field) ?? { added: 0, removed: 0, changed: 0 };
+    entry[kind] += 1;
+    counts.set(field, entry);
+  };
+
+  for (const index of indices) {
+    const a = before[index];
+    const b = after[index];
+    for (const key of Object.keys(b)) {
+      if (key === "at") continue;
+      if (!(key in a)) bump(key, "added");
+      else if (JSON.stringify(a[key]) !== JSON.stringify(b[key])) bump(key, "changed");
+    }
+    for (const key of Object.keys(a)) {
+      if (key !== "at" && !(key in b)) bump(key, "removed");
+    }
+  }
+  return counts;
+};
+
+/** The largest count for one field, so the loudest field is listed first. */
+const weight = (counts: { added: number; removed: number; changed: number }): number =>
+  Math.max(counts.added, counts.removed, counts.changed);
+
+const describeField = (counts: { added: number; removed: number; changed: number }): string =>
+  (["added", "removed", "changed"] as const)
+    .filter((kind) => counts[kind] > 0)
+    .map((kind) => `${kind} on ${counts[kind]} event${counts[kind] === 1 ? "" : "s"}`)
+    .join(", ");
+
 /** The first field two events disagree on, timestamp included. */
 const firstField = (a: Record<string, unknown>, b: Record<string, unknown>): string | null => {
   const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
@@ -309,14 +357,28 @@ const describeDrift = (fixtureLines: string[], liveLines: string[]): string[] =>
   }
   if (reshaped.length > 0) {
     out.push(`content: ${reshaped.length} changed beyond their timestamp`);
+    const entries = [...tallyFields(rowsBefore, rowsAfter, reshaped).entries()].sort(
+      (a, b) => weight(b[1]) - weight(a[1]) || a[0].localeCompare(b[0]),
+    );
+    for (const [field, counts] of entries.slice(0, DETAIL_FIELDS)) {
+      out.push(`  ${field}: ${describeField(counts)}`);
+    }
+    if (entries.length > DETAIL_FIELDS) {
+      out.push(`  and ${entries.length - DETAIL_FIELDS} more fields`);
+    }
   }
 
-  const row = first < 0 ? null : firstField(rowsBefore[first], rowsAfter[first]);
-  if (first >= 0 && row !== null) {
+  const field = first < 0 ? null : firstField(rowsBefore[first], rowsAfter[first]);
+  if (first >= 0 && field !== null) {
     const a = rowsBefore[first];
     const b = rowsAfter[first];
-    const show = (value: unknown) => (row === "at" ? asMs(value) : JSON.stringify(value));
-    out.push(`first: #${a.seq} ${kindOf(a)} ${row} ${show(a[row])} → ${show(b[row])}`);
+    const show = (value: unknown): string => {
+      // A field the other side does not have is the difference, not an absence
+      // of one: printing `undefined` here would read as a bug in the check.
+      if (value === undefined) return "(absent)";
+      return field === "at" ? asMs(value) : JSON.stringify(value);
+    };
+    out.push(`first: #${a.seq} ${kindOf(a)} ${field} ${show(a[field])} → ${show(b[field])}`);
   }
 
   return out.length === 0 ? ["the bytes differ but no field does: check trailing whitespace"] : out;
@@ -334,10 +396,14 @@ const overlap = (a: number[], b: number[]): number => {
 // that a change touching three scenarios names all three at once, rather than
 // making the reader regenerate, re-run and discover the next one.
 const stale: string[] = [];
+// A world whose scenario no longer runs is stale in a way recopying cannot
+// repair, so the advice has to differ for it.
+let unrunnable = false;
 for (const { name, fixture } of worlds) {
   const path = fixturePath(fixture);
   const live = runGo(name);
   if (!live.ok) {
+    unrunnable = true;
     stale.push(
       indentLines([
         `${path} cannot be checked: \`go run ./cmd/aegis run --scenario ${name}\` failed.`,
@@ -366,6 +432,11 @@ if (stale.length > 0) {
       `\n  changed leaves yesterday's log on the page. Recopy every fixture and commit` +
       `\n  the result:\n\n` +
       `    AEGIS_GO_REPO=${goRepo} npm run sync-fixture\n` +
+      (unrunnable
+        ? `\n  A scenario the implementation no longer runs cannot be recopied: either the` +
+          `\n  name in the fixture and in src/engine/scenario.ts is stale and should follow` +
+          `\n  the new one, or the scenario is gone and its fixture should go with it.`
+        : "") +
       `\n  until then this check cannot say whether the port agrees with the code,` +
       `\n  because it is comparing both against a log neither side produces any more.`,
   );
