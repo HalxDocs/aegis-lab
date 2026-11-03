@@ -66,7 +66,7 @@ The same steps, one at a time:
 
 ```bash
 npm run gate          # re-measure the proof card's numbers from ../aegis
-npm run parity        # all four worlds vs. the Go fixtures, hashed + causal claims
+npm run parity        # every world vs. the Go fixtures, hashed + causal claims
 npm run build         # tsc -b && vite build
 npm run sync-fixture  # regenerate every fixture from ../aegis (set AEGIS_GO_REPO)
 ```
@@ -86,14 +86,22 @@ moves. A port that drifted fails against the fixture instead, and points at
 `src/engine/`. Both are the same exit code and mean opposite repairs, which is why
 the check tells them apart rather than printing one log against another.
 
+The worlds are a hand-written list, so `npm run parity` also compares it against
+the scenarios the implementation can run — read from its own `func lookup`, not
+from the usage text beside it. A scenario that exists but has no world fails the
+check by name, because a page that omits one still reads as having checked them
+all.
+
 CI runs the same gate on every push and pull request. Because the page proves
 things about the Go repository, the workflow checks that out too and runs
 `make check-all` from it, with `AEGIS_GO_REPO` saying where it landed — so a
 change to the page is gated without a commit to the implementation.
 
 `npm run sync-fixture` shells out to `go run ./cmd/aegis run --scenario <name>
---format jsonl` for each of the four scenarios in the Go repository, defaulting
-to `../aegis`.
+--format jsonl` for each scenario the Go repository can run, defaulting to
+`../aegis`. That list is read from the implementation's `func lookup` rather than
+kept here, so a new scenario is synced instead of being left with a fixture
+nobody writes.
 
 The proof card's gate numbers — packages, test and race results, vet, coverage,
 scenarios replayed — are not typed into the page. `npm run gate` measures them in
