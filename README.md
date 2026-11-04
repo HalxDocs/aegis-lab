@@ -103,6 +103,12 @@ things about the Go repository, the workflow checks that out too and runs
 `make check-all` from it, with `AEGIS_GO_REPO` saying where it landed — so a
 change to the page is gated without a commit to the implementation.
 
+`npm run hooks` points `core.hooksPath` at `hooks/`, where a pre-push hook runs
+`npm run check` before anything leaves the machine. Branch protection cannot
+require that check: GitHub rejects a direct push to `main` with `GH006` because
+the checks only exist after the push they would reject. `git push --no-verify`
+skips it when the push is not about code.
+
 `npm run sync-fixture` shells out to `go run ./cmd/aegis run --scenario <name>
 --format jsonl` for each scenario the Go repository can run, defaulting to
 `../aegis`. That list comes from `aegis scenarios` rather than being kept here,

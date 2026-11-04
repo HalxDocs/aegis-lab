@@ -1,0 +1,8 @@
+#!/bin/sh
+# The page's whole proof, before anything leaves the machine. CI runs the same
+# command through aegis' `make check-all`; branch protection cannot require it,
+# because "require status checks" rejects the direct push that would produce
+# them (GH006). Bypass deliberately with `git push --no-verify`.
+set -e
+printf 'pre-push: npm run check\n'
+exec npm run check
