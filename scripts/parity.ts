@@ -42,7 +42,11 @@ import { verifyAction, verifyActions } from "../src/engine/verify";
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, "..", "src", "engine", "fixtures");
 
-const fail = (message: string): never => {
+// Annotated on the binding, not just on the arrow: TypeScript only uses a
+// call's `never` return to narrow control flow when the declared type is on the
+// variable, so `const fail = (m: string): never => ...` leaves every guard above
+// `fail(...)` looking like it can fall through.
+const fail: (message: string) => never = (message) => {
   console.error(`\n✗ parity failed\n\n${message}\n`);
   process.exit(1);
 };
@@ -454,10 +458,10 @@ if (stale.length > 0) {
 const runnable =
   runnableScenarios(goRepo) ??
   fail(
-    `could not read the runnable scenarios from cmd/aegis/main.go.\n\n` +
-      `  This check compares the worlds against the \`runnable\` table in` +
-      `\n  cmd/aegis/main.go, whose names are the set. If that moved or was reshaped,` +
-      `\n  the check cannot tell which scenarios exist, and a coverage check that cannot` +
+    `could not run \`go run ./cmd/aegis scenarios\` in ${goRepo}.\n\n` +
+      `  That command prints the scenarios the implementation can run, one per` +
+      `\n  line, and this check compares the worlds against it. If it cannot run, the` +
+      `\n  check cannot tell which scenarios exist, and a coverage check that cannot` +
       `\n  see the list would pass whatever it was handed.`,
   );
 

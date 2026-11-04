@@ -1,34 +1,34 @@
 /**
- * The scenarios the Go implementation can run, read from its own dispatch.
+ * The scenarios the Go implementation can run, asked of the implementation.
  *
- * The `runnable` table in cmd/aegis/main.go is the set: the usage text repeats
- * that list by hand, so trusting it would only compare one copy against another.
+ * `go run ./cmd/aegis scenarios` prints them one per line. Asking the binary is
+ * the point: a previous version parsed the `runnable` table out of main.go, which
+ * meant this check failed with the right loudness and the wrong diagnosis when
+ * that file moved, and could not tell a reshaped table from an empty one. The
+ * command is an interface, so a rename there is a contract change rather than a
+ * regex that quietly stops matching.
+ *
  * Both the parity check and the fixture sync ask this module, so a scenario added
  * in the Go repository is noticed by both rather than remembered by each.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 
-/** The names in the `runnable` table, or null when it cannot be read. */
+/** The names the implementation prints, or null when it cannot be asked. */
 export const runnableScenarios = (goRepo: string): string[] | null => {
-  let text: string;
+  let out: string;
   try {
-    text = readFileSync(join(goRepo, "cmd/aegis/main.go"), "utf8");
+    out = execFileSync("go", ["run", "./cmd/aegis", "scenarios"], {
+      cwd: goRepo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   } catch {
     return null;
   }
 
-  const lines = text.split("\n");
-  const start = lines.findIndex((line) => line.startsWith("var runnable = "));
-  if (start < 0) return null;
-
-  const names: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    // The table's field lines and its `}{` follow the declaration, so only a
-    // closing brace on its own ends the entries.
-    if (line === "}") break;
-    const match = /\bname:\s*"([^"]+)"/.exec(line);
-    if (match !== null) names.push(match[1]);
-  }
+  const names = out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
   return names.length === 0 ? null : names;
 };

@@ -26,7 +26,9 @@ if (!existsSync(goRepo)) {
 const scenarios = runnableScenarios(goRepo);
 if (scenarios === null) {
   console.error(
-    `could not read the runnable scenarios from ${goRepo}/cmd/aegis/main.go (func lookup)`,
+    `could not run \`go run ./cmd/aegis scenarios\` in ${goRepo}.\n\n` +
+      `  That command prints the scenarios the implementation can run, one per` +
+      ` line. Without it the fixtures cannot be regenerated for the right set.`,
   );
   process.exit(1);
 }
