@@ -7,6 +7,14 @@
  * own log in `scripts/parity.ts`.
  */
 
+/**
+ * The format a log written by this engine declares.
+ *
+ * It matches `domain.EventLogSchema` in the Go implementation and is written on
+ * the opening event, so a file says which rules read it.
+ */
+export const EVENT_LOG_SCHEMA = "aegis.eventlog/v1";
+
 /** A point on the virtual timeline, in nanoseconds. */
 export type Tick = number;
 
@@ -75,6 +83,15 @@ export interface Event {
   round?: number;
   reason?: string;
   scenario?: string;
+  /**
+   * The format this history is written in, on the opening event and nowhere
+   * else.
+   *
+   * One place rather than every line: a version repeated on each event is a
+   * version that can disagree with itself, and a reader has no rule for which
+   * line wins.
+   */
+  schema?: string;
   /** The recovery decision this event belongs to, on the four recovery kinds. */
   action?: ActionId;
   /**

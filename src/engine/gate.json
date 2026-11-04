@@ -1,9 +1,9 @@
 {
-  "packages": 9,
+  "packages": 10,
   "test": true,
   "race": true,
   "vet": true,
-  "coverage": 92.4,
+  "coverage": 91.7,
   "replay": {
     "ok": true,
     "scenarios": [

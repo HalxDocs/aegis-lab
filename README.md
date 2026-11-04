@@ -26,6 +26,11 @@ the log the Go CLI produced — 139 events in total, hashed on both sides in the
 page. The decisions are read back out of the log by a port of the proof query
 rather than trusted from the run that made them.
 
+That comparison includes the first line: the event that opens a history names the
+format it is written in (`aegis.eventlog/v1`), and the port writes the same field
+in the same place, so a change to the file format on either side fails parity
+rather than being inferred from a diff in the middle of the file.
+
 Every event in that log cites the events that caused it, so the page can answer
 a second question: not only what happened, but why a belief changed. Click any
 belief, any line in the live log, or any row of the four committed histories —

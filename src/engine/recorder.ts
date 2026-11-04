@@ -1,3 +1,4 @@
+import { EVENT_LOG_SCHEMA } from "./types";
 import type { ActionId, Event, Kind, NodeId, Ref, Tick } from "./types";
 
 export interface EventInput {
@@ -8,6 +9,8 @@ export interface EventInput {
   round?: number;
   reason?: string;
   scenario?: string;
+  /** The log format. Filled in on the opening event; refused anywhere else. */
+  schema?: string;
   /** The decision this event belongs to, on the recovery kinds. */
   action?: ActionId;
   /** Events that caused this one. Must already be in the log. */
@@ -31,6 +34,22 @@ export class Recorder {
   record(input: EventInput): Ref {
     const seq = this.events.length + 1;
     const causes = input.causes === undefined ? undefined : [...input.causes];
+
+    // The format belongs to the history, so the recorder fills it in rather
+    // than trusting every caller to remember. A caller that states a different
+    // one is refused: it either meant a format this engine cannot write or made
+    // a mistake that would otherwise reach a file.
+    let schema = input.schema;
+    if (input.kind === "scenario_started") {
+      if (schema === undefined || schema === "") schema = EVENT_LOG_SCHEMA;
+      if (schema !== EVENT_LOG_SCHEMA) {
+        throw new Error(
+          `event ${seq}: history opens as ${JSON.stringify(schema)}, this engine writes ${EVENT_LOG_SCHEMA}`,
+        );
+      }
+    } else if (schema !== undefined && schema !== "") {
+      throw new Error(`event ${seq}: ${input.kind} must not name a schema; only scenario_started opens a history`);
+    }
 
     if (causes !== undefined) {
       if (causes.length === 0) {
@@ -73,6 +92,7 @@ export class Recorder {
     if (input.round !== undefined && input.round !== 0) event.round = input.round;
     if (input.reason !== undefined && input.reason !== "") event.reason = input.reason;
     if (input.scenario !== undefined && input.scenario !== "") event.scenario = input.scenario;
+    if (schema !== undefined && schema !== "") event.schema = schema;
     if (input.action !== undefined && input.action !== 0) event.action = input.action;
     if (causes !== undefined) event.causes = causes;
     this.events.push(event);
